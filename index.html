@@ -169,8 +169,8 @@ ol.items li::marker{font-family:var(--mono);color:var(--ink-soft);font-size:.9em
   </div>
   <p class="eyebrow">Choisissez la couleur de votre équipe</p>
   <div class="teams" id="teams"></div>
-  <button class="link" id="to-anim" type="button">Écran de l'animatrice</button>
-  <footer class="credits"><p>Application créée par <b>Grace Sella</b>, présidente de l'APFI</p><p>contenu proposé par <b>Claudie Harari</b>, présidente de FLAM</p><p>Novembre 2026</p></footer>
+  <button class="link" id="to-anim" type="button">Écran de l'animatrice (code requis)</button>
+  <footer class="credits"><p>Application créée par <b>Grace Sella</b>, présidente de l'APFI</p><p>contenu élaboré par <b>Claudie Harari</b>, présidente de FLAM</p><p>Novembre 2026</p></footer>
 </section>
 
 <!-- ================= ÉQUIPE : lettre ================= -->
@@ -205,6 +205,13 @@ ol.items li::marker{font-family:var(--mono);color:var(--ink-soft);font-size:.9em
 </section>
 
 <!-- ================= ANIMATRICE ================= -->
+<section id="v-lock" class="wrap" hidden>
+  <div class="head"><div class="seal">CLF</div><div><p class="eyebrow">Comité de la Langue Française</p><h1>Écran de l'animatrice</h1></div></div>
+  <form class="answer" id="lock-form"><label for="lock-pw">Cet écran est réservé à l'animatrice. Entrez le code pour l'ouvrir.</label>
+    <div class="row"><input id="lock-pw" autocomplete="off" autocapitalize="characters" spellcheck="false"><button class="btn" type="submit">Ouvrir</button></div>
+    <p class="fb" id="lock-fb" aria-live="polite"></p></form>
+  <button class="link" id="lock-back" type="button">Revenir au jeu</button>
+</section>
 <section id="v-anim" class="anim" hidden>
   <div class="anim-top">
     <div class="seal">CLF</div>
@@ -376,7 +383,7 @@ function fmt(ms){var neg=ms<0;ms=Math.abs(ms);var s=Math.floor(ms/1000),m=Math.f
 function load(k){try{var v=localStorage.getItem(k);return v?JSON.parse(v):null}catch(e){return null}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
 function pieceFor(teamIdx,e){return ((e*6+teamIdx)%20)+1}
-function show(id){["v-start","v-letter","v-play","v-anim"].forEach(function(v){$(v).hidden=(v!==id)});window.scrollTo(0,0)}
+function show(id){["v-start","v-letter","v-play","v-anim","v-lock"].forEach(function(v){$(v).hidden=(v!==id)});window.scrollTo(0,0)}
 
 /* ---------- état équipe ---------- */
 var S=load("mvc-team")||null;
@@ -591,13 +598,20 @@ var armC=false;
 $("a-clear").addEventListener("click",function(){var b=this;if(!armC){armC=true;b.textContent="Confirmer : tout effacer";setTimeout(function(){armC=false;b.textContent="Nouvelle partie"},3500);return}armC=false;b.textContent="Nouvelle partie";clearGame();pa();buildGrid();buildScore();startLabel();animTick();
   post({k:"reset",dev:DEV,ts:Date.now()}).then(function(j){if(j&&j.id){A.resets.push(j.id);A.sinceId=j.id;pa();connectLive()}}).catch(function(){})});
 $("a-final").addEventListener("click",function(){var f=$("a-finale");f.innerHTML=FINAL_LETTER;f.hidden=!f.hidden;$("a-board").hidden=!f.hidden;$("a-score").hidden=!f.hidden;this.textContent=f.hidden?"Lettre finale":"Revenir au puzzle"});
-$("a-back").addEventListener("click",function(){if(location.hash)history.replaceState(null,"",location.pathname+location.search);route(true)});
+$("a-back").addEventListener("click",function(){unlocked=false;try{localStorage.removeItem("mvc-anim-ok")}catch(e){}if(location.hash)history.replaceState(null,"",location.pathname+location.search);route(true)});
 $("to-anim").addEventListener("click",function(){route(false,true)});
 
+/* ---------- verrou de l'écran animatrice ---------- */
+var unlocked=false;
+function animOk(){if(unlocked)return true;try{return localStorage.getItem("mvc-anim-ok")===RESET_HASH}catch(e){return false}}
+$("lock-form").addEventListener("submit",function(ev){ev.preventDefault();
+  if(hash($("lock-pw").value)===RESET_HASH){unlocked=true;try{localStorage.setItem("mvc-anim-ok",RESET_HASH)}catch(e){}$("lock-pw").value="";route(false,true)}
+  else{var f=$("lock-fb");f.textContent="Code incorrect.";f.className="fb bad"}});
+$("lock-back").addEventListener("click",function(){if(location.hash)history.replaceState(null,"",location.pathname+location.search);route(true)});
 /* ---------- routage ---------- */
 function route(forceTeam,forceAnim){
   $("away").hidden=true;
-  if(forceAnim||(!forceTeam&&location.hash==="#animateur")){show("v-anim");if(!es)connectLive();buildScore();buildGrid();startLabel();animTick();return}
+  if(forceAnim||(!forceTeam&&location.hash==="#animateur")){if(!animOk()){show("v-lock");setTimeout(function(){try{$("lock-pw").focus()}catch(e){}},50);return}show("v-anim");if(!es)connectLive();buildScore();buildGrid();startLabel();animTick();return}
   if(!S){show("v-start");return}
   if(!S.start){show("v-letter");return}
   show("v-play");renderPlay();tick();wake();
