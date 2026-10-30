@@ -131,6 +131,12 @@ ol.items li::marker{font-family:var(--mono);color:var(--ink-soft);font-size:.9em
 .cell.on{background:var(--gold);border-color:var(--gold);color:var(--navy)}
 .ft{width:84px;font:700 1rem var(--mono);padding:6px;border-radius:6px;border:1.5px solid var(--navy-3);background:var(--navy);color:var(--paper);text-align:center}
 .rank{font:700 1.2rem var(--display);color:var(--gold);min-width:3ch}
+.live{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:.9rem;padding:5px 12px;border-radius:999px;border:1.5px solid var(--navy-3);background:var(--navy)}
+.live::before{content:"";width:10px;height:10px;border-radius:50%;background:#c9a227}
+.live.on{border-color:var(--ok);color:#bdf0d2}.live.on::before{background:#3ddc84;box-shadow:0 0 0 4px rgba(61,220,132,.2)}
+.live.off{color:#ffd9a0}
+.tn small{display:block;font:700 .75rem var(--body);color:#b9c2dc;margin-top:2px}
+.tn small.warn{color:#ffb0a6}
 .grid20{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
 .slot{aspect-ratio:1.35;max-width:100%;background:var(--navy);border:1.5px dashed var(--navy-3);border-radius:6px;display:grid;place-items:center;color:#7d8db8;font:700 clamp(1rem,2.4vw,2rem) var(--mono);padding:0;overflow:hidden;position:relative}
 .slot:hover{border-color:var(--gold)}
@@ -226,7 +232,8 @@ ol.items li::marker{font-family:var(--mono);color:var(--ink-soft);font-size:.9em
     </ul>
   </div>
   <div class="board" id="a-score">
-    <div class="board-head"><h2>Les équipes</h2><span class="muted">Cliquez sur l'énigme annoncée : la pièce s'affiche dans le puzzle.</span></div>
+    <div class="board-head"><h2>Les équipes</h2><span class="live" id="live">Connexion aux téléphones…</span></div>
+    <p class="muted" id="live-help">Les cases se cochent toutes seules quand une équipe trouve un mot de passe. Si la connexion est coupée, cliquez sur la case annoncée par l'équipe.</p>
     <div class="score-wrap"><table class="score"><thead><tr><th style="text-align:left">Équipe</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>Temps final</th><th>Rang</th></tr></thead><tbody id="score"></tbody></table></div>
     <p class="muted">Temps final : à recopier depuis l'écran de fin du téléphone (jeu + pénalités). Le classement se fait sur ce temps, puis sur le nombre d'énigmes résolues.</p>
   </div>
@@ -357,6 +364,10 @@ var E=[
   done:"La francophonie, une grande famille !"}
 ];
 
+/* ---------- liaison téléphones et écran (ntfy.sh) ---------- */
+var SYNC="https://ntfy.sh/mvc-jipf2026-99e7e1577a65";
+var DEV=(function(){try{var d=localStorage.getItem("mvc-dev");if(!d){d=Math.random().toString(36).slice(2,10);localStorage.setItem("mvc-dev",d)}return d}catch(e){return Math.random().toString(36).slice(2,10)}})();
+function post(obj){try{return fetch(SYNC,{method:"POST",body:JSON.stringify(obj),keepalive:true}).then(function(r){if(!r.ok)throw 0;return r.json()})}catch(e){return Promise.reject(e)}}
 /* ---------- utilitaires ---------- */
 function norm(s){return s.normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/[^A-Z0-9]/g,"")}
 function hash(s){var x=0x811c9dc5,t=norm(s);for(var i=0;i<t.length;i++){x^=t.charCodeAt(i);x=Math.imul(x,0x01000193)>>>0}return x.toString(16)}
@@ -369,7 +380,13 @@ function show(id){["v-start","v-letter","v-play","v-anim"].forEach(function(v){$
 
 /* ---------- état équipe ---------- */
 var S=load("mvc-team")||null;
-function persist(){save("mvc-team",S)}
+var lastSent="",outbox=null;
+function snapshot(){if(!S||S.team==null)return null;var n=Math.min(6,S.step+(S.solved?1:0));
+  return {k:"team",team:S.team,dev:DEV,solved:S.start?n:0,started:!!S.start,exits:S.exits,hints:S.hintsUsed,fin:S.finishedAt?(S.finishedAt-S.start+S.exits*EXIT_PEN+S.hintsUsed*HINT_PEN):0}}
+function flush(){if(!outbox)return;var m=outbox;post(m).then(function(){if(outbox===m)outbox=null}).catch(function(){})}
+setInterval(flush,5000);
+function persist(){save("mvc-team",S);var m=snapshot();if(!m)return;var key=JSON.stringify(m);if(key===lastSent)return;lastSent=key;m.ts=Date.now();outbox=m;flush()}
+function wipeTeam(){if(S&&S.team!=null){post({k:"leave",team:S.team,dev:DEV,ts:Date.now()}).catch(function(){})}lastSent="";outbox=null;S=null;try{localStorage.removeItem("mvc-team")}catch(e){};route()}
 function remaining(){if(!S||!S.start)return DURATION;var end=S.finishedAt||Date.now();return DURATION-(end-S.start)-S.exits*EXIT_PEN-S.hintsUsed*HINT_PEN}
 
 /* écran de départ */
@@ -413,7 +430,7 @@ function renderPlay(){
   function admOk(){if(hash($("apw").value)===RESET_HASH)return true;$("afb").textContent="Code incorrect.";$("afb").className="fb bad";return false}
   $("adm-skip").addEventListener("click",function(){if(!admOk())return;S.solved=true;persist();renderPlay()});
   $("adm-prev").addEventListener("click",function(){if(!admOk())return;if(S.step>0){S.step--;S.solved=false;persist()}renderPlay()});
-  $("adm-reset").addEventListener("click",function(){if(!admOk())return;S=null;try{localStorage.removeItem("mvc-team")}catch(e){}route()});
+  $("adm-reset").addEventListener("click",function(){if(!admOk())return;wipeTeam()});
   guard($("sheet"));
 }
 function check(){
@@ -446,7 +463,7 @@ function renderFinal(body){
   bindReset();
 }
 function resetForm(){return '<details class="rules"><summary class="eyebrow" style="cursor:pointer">Réservé à l’animatrice, après le jeu</summary><form class="answer" id="rst" style="padding:0;background:none"><label for="rpw">Effacer ce téléphone pour le réutiliser dans une autre partie. À ne faire qu’après avoir noté le temps final.</label><div class="row"><input id="rpw" autocomplete="off" autocapitalize="characters" placeholder="Code"><button class="btn small ghost" type="submit">Effacer</button></div><p class="fb" id="rfb"></p></form></details>'}
-function bindReset(){$("rst").addEventListener("submit",function(ev){ev.preventDefault();if(hash($("rpw").value)===RESET_HASH){S=null;try{localStorage.removeItem("mvc-team")}catch(e){}route()}else{$("rfb").textContent="Code incorrect.";$("rfb").className="fb bad"}})}
+function bindReset(){$("rst").addEventListener("submit",function(ev){ev.preventDefault();if(hash($("rpw").value)===RESET_HASH){wipeTeam()}else{$("rfb").textContent="Code incorrect.";$("rfb").className="fb bad"}})}
 
 function updateExits(){
   if(!S)return;var c=$("bar-exits");
@@ -494,14 +511,18 @@ function buildScore(){
   var tb=$("score");tb.innerHTML="";
   TEAMS.forEach(function(team,i){
     var t=A.teams[i],tr=document.createElement("tr");if(!rank[i])tr.className="idle";
-    var td=document.createElement("td");td.className="tn";td.innerHTML='<span class="env" style="background:'+team.c+'"></span>'+team.name;tr.appendChild(td);
+    var td=document.createElement("td");td.className="tn";td.innerHTML='<span class="env" style="background:'+team.c+'"></span>'+team.name;
+    var L=A.live[i];if(L){var nd=Object.keys(L.devs).length,sm=document.createElement("small");
+      var bits=[];if(nd>1)bits.push("⚠ "+nd+" téléphones");bits.push(L.exits+" sortie"+(L.exits>1?"s":""));bits.push(L.hints+" indice"+(L.hints>1?"s":""));
+      sm.textContent=bits.join(" · ");if(nd>1||L.exits)sm.className="warn";td.appendChild(sm)}
+    tr.appendChild(td);
     for(var e=0;e<6;e++){(function(e){
       var c=document.createElement("td"),b=document.createElement("button");b.type="button";
       b.className="cell"+(t.done[e]?" on":"");b.textContent=t.done[e]?"✓":(e+1);
       b.setAttribute("aria-label",team.name+", énigme "+(e+1));
       b.addEventListener("click",function(){toggleSolve(i,e)});c.appendChild(b);tr.appendChild(c)})(e)}
     var fc=document.createElement("td"),inp=document.createElement("input");inp.className="ft";inp.id="ft-"+i;inp.placeholder="mm:ss";inp.value=t.final;inp.inputMode="numeric";
-    inp.addEventListener("change",function(){t.final=inp.value.trim();pa();buildScore()});fc.appendChild(inp);tr.appendChild(fc);
+    inp.addEventListener("change",function(){t.final=inp.value.trim();t.auto=false;pa();buildScore()});fc.appendChild(inp);tr.appendChild(fc);
     var rc=document.createElement("td");rc.className="rank";rc.textContent=rank[i]?(rank[i]===1?"1er":rank[i]+"e"):"";tr.appendChild(rc);
     tb.appendChild(tr)});
 }
@@ -514,6 +535,39 @@ function toggleSolve(i,e){
   pa();buildScore();buildGrid();
 }
 function pa(){save("mvc-anim",A)}
+if(!A.live)A.live={};if(!A.resets)A.resets=[];
+var es=null,liveOn=false;
+var offTimer=null;
+function setLive(on){var l=$("live");if(!l)return;clearTimeout(offTimer);
+  if(on){liveOn=true;l.className="live on";l.textContent="Téléphones reliés";return}
+  offTimer=setTimeout(function(){liveOn=false;l.className="live off";l.textContent="Hors connexion : cochez à la main"},8000)}
+function connectLive(){
+  if(es){try{es.close()}catch(e){}es=null}
+  if(typeof EventSource==="undefined"){setLive(false);return}
+  var since=A.sinceId||"12h";
+  try{es=new EventSource(SYNC+"/sse?since="+encodeURIComponent(since))}catch(e){setLive(false);return}
+  es.onopen=function(){setLive(true)};
+  es.onerror=function(){setLive(false)};
+  es.onmessage=function(ev){var d;try{d=JSON.parse(ev.data)}catch(e){return}
+    if(d.event&&d.event!=="message")return;var m;try{m=JSON.parse(d.message)}catch(e){return}
+    setLive(true);applyLive(m,d.id)};
+}
+function clearGame(){A.pieces=[];A.teams=blankTeams();A.live={};A.running=false;A.elapsed=0;A.bonus=0}
+function applyLive(m,id){
+  if(!m||typeof m!=="object")return;
+  if(m.k==="reset"){if(A.resets.indexOf(id)>=0)return;A.resets.push(id);if(m.dev!==DEV){clearGame()}A.sinceId=id;pa();refreshAnim();connectLive();return}
+  var i=m.team;if(typeof i!=="number"||!TEAMS[i])return;
+  var L=A.live[i]||(A.live[i]={devs:{},exits:0,hints:0});
+  if(m.k==="leave"){delete L.devs[m.dev];pa();refreshAnim();return}
+  if(m.k!=="team")return;
+  L.devs[m.dev]=Math.max(L.devs[m.dev]||0,m.ts||1);
+  L.exits=Math.max(L.exits,m.exits||0);L.hints=Math.max(L.hints,m.hints||0);
+  var t=A.teams[i];
+  for(var e=0;e<Math.min(6,m.solved||0);e++){if(!t.done[e]){t.done[e]=m.ts||1}var p=pieceFor(i,e);if(A.pieces.indexOf(p)<0)A.pieces.push(p)}
+  if(m.fin>0&&(!t.final||t.auto)){t.final=fmt(m.fin);t.auto=true}
+  pa();refreshAnim();
+}
+function refreshAnim(){if(!$("v-anim").hidden){buildScore();buildGrid()}}
 function aRemain(){var el=A.elapsed+(A.running?Date.now()-A.startAt:0);return DURATION+A.bonus-el}
 function animTick(){var r=aRemain(),c=$("a-clock");c.textContent=fmt(r);c.className="big-clock"+(r<0?" late":"")}
 function buildGrid(){
@@ -534,7 +588,8 @@ $("a-reset").addEventListener("click",function(){var b=this;if(!armR){armR=true;
 $("a-rules").addEventListener("click",function(){var r=$("a-rules-box");r.hidden=!r.hidden;this.textContent=r.hidden?"Afficher les règles":"Masquer les règles"});
 $("a-all").addEventListener("click",function(){A.pieces=[];for(var i=1;i<=20;i++)A.pieces.push(i);pa();buildGrid()});
 var armC=false;
-$("a-clear").addEventListener("click",function(){var b=this;if(!armC){armC=true;b.textContent="Confirmer : tout effacer";setTimeout(function(){armC=false;b.textContent="Nouvelle partie"},3500);return}armC=false;b.textContent="Nouvelle partie";A.pieces=[];A.teams=blankTeams();A.running=false;A.elapsed=0;A.bonus=0;pa();buildGrid();buildScore();startLabel();animTick()});
+$("a-clear").addEventListener("click",function(){var b=this;if(!armC){armC=true;b.textContent="Confirmer : tout effacer";setTimeout(function(){armC=false;b.textContent="Nouvelle partie"},3500);return}armC=false;b.textContent="Nouvelle partie";clearGame();pa();buildGrid();buildScore();startLabel();animTick();
+  post({k:"reset",dev:DEV,ts:Date.now()}).then(function(j){if(j&&j.id){A.resets.push(j.id);A.sinceId=j.id;pa();connectLive()}}).catch(function(){})});
 $("a-final").addEventListener("click",function(){var f=$("a-finale");f.innerHTML=FINAL_LETTER;f.hidden=!f.hidden;$("a-board").hidden=!f.hidden;$("a-score").hidden=!f.hidden;this.textContent=f.hidden?"Lettre finale":"Revenir au puzzle"});
 $("a-back").addEventListener("click",function(){if(location.hash)history.replaceState(null,"",location.pathname+location.search);route(true)});
 $("to-anim").addEventListener("click",function(){route(false,true)});
@@ -542,7 +597,7 @@ $("to-anim").addEventListener("click",function(){route(false,true)});
 /* ---------- routage ---------- */
 function route(forceTeam,forceAnim){
   $("away").hidden=true;
-  if(forceAnim||(!forceTeam&&location.hash==="#animateur")){show("v-anim");buildScore();buildGrid();startLabel();animTick();return}
+  if(forceAnim||(!forceTeam&&location.hash==="#animateur")){show("v-anim");if(!es)connectLive();buildScore();buildGrid();startLabel();animTick();return}
   if(!S){show("v-start");return}
   if(!S.start){show("v-letter");return}
   show("v-play");renderPlay();tick();wake();
